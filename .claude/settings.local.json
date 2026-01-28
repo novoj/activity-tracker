@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(timeout:*)",
+      "Bash(gdbus call:*)",
+      "Bash(gsettings get:*)",
+      "Bash(tree:*)"
+    ]
+  }
+}
