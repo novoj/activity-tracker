@@ -10,7 +10,10 @@
 #include <gio/gio.h>
 #include <glib-unix.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <limits.h>
 #include <sys/file.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -161,7 +164,7 @@ static int try_acquire_lock(void)
     g_mkdir_with_parents(dir, 0700);
     g_free(dir);
 
-    int fd = open(lock_path, O_RDWR | O_CREAT, 0644);
+    int fd = open(lock_path, O_RDWR | O_CREAT, 0600);
     g_free(lock_path);
     if (fd < 0)
         return -1;
@@ -348,20 +351,28 @@ int main(int argc, char *argv[])
             date_str = optarg;
             explicit_stats = TRUE;
             break;
-        case 'n':
-            opts.top_apps = atoi(optarg);
-            if (opts.top_apps < 1) {
-                g_printerr("--top-apps must be at least 1\n");
+        case 'n': {
+            char *endptr;
+            errno = 0;
+            long val = strtol(optarg, &endptr, 10);
+            if (errno || *endptr != '\0' || val < 1 || val > INT_MAX) {
+                g_printerr("--top-apps must be a positive integer\n");
                 return 1;
             }
+            opts.top_apps = (int)val;
             break;
-        case 't':
-            opts.top_titles = atoi(optarg);
-            if (opts.top_titles < 1) {
-                g_printerr("--top-titles must be at least 1\n");
+        }
+        case 't': {
+            char *endptr;
+            errno = 0;
+            long val = strtol(optarg, &endptr, 10);
+            if (errno || *endptr != '\0' || val < 1 || val > INT_MAX) {
+                g_printerr("--top-titles must be a positive integer\n");
                 return 1;
             }
+            opts.top_titles = (int)val;
             break;
+        }
         case 'h':
             print_usage(argv[0]);
             return 0;

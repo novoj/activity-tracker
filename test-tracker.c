@@ -255,9 +255,9 @@ static gchar *create_test_tmpdir(void)
 static void cleanup_test_tmpdir(gchar *tmpdir)
 {
     /* Remove directory tree */
-    gchar *cmd = g_strdup_printf("rm -rf '%s'", tmpdir);
-    g_spawn_command_line_sync(cmd, NULL, NULL, NULL, NULL);
-    g_free(cmd);
+    gchar *argv[] = {"rm", "-rf", tmpdir, NULL};
+    g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH,
+                 NULL, NULL, NULL, NULL, NULL, NULL);
     g_free(tmpdir);
 }
 
