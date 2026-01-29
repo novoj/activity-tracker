@@ -164,6 +164,28 @@ static void test_emit_csv_no_title(void)
     g_string_free(buf, TRUE);
 }
 
+static void test_emit_csv_idle(void)
+{
+    AppState state = {0};
+    state.current_title = g_strdup("Ignored Title");
+    state.current_wm_class = g_strdup("SomeClass");
+    state.current_wm_class_instance = g_strdup("someinstance");
+    state.current_wall = 1705311000;
+    state.current_start = 0;
+    state.is_locked = FALSE;
+    state.is_idle = TRUE;
+
+    GString *buf = g_string_new(NULL);
+    emit_csv_to_buffer(buf, &state, 10 * G_USEC_PER_SEC);
+
+    g_assert_true(g_str_has_suffix(buf->str, ",10,idle,\"\",\"\",\"\"\n"));
+
+    g_string_free(buf, TRUE);
+    g_free(state.current_title);
+    g_free(state.current_wm_class);
+    g_free(state.current_wm_class_instance);
+}
+
 /* ── parse_focused_window ──────────────────────────────────── */
 
 static void test_parse_focused_window_found(void)
@@ -855,6 +877,57 @@ static void test_no_line_overflow(void)
     cleanup_test_tmpdir(tmpdir);
 }
 
+/* ── idle in stats ─────────────────────────────────────────── */
+
+static void test_stats_idle_counted_as_away(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+        "2026-01-28T10:00:00,60,active,\"Tab 1\",\"Firefox\",\"navigator\"\n"
+        "2026-01-28T10:01:00,300,idle,\"\",\"\",\"\"\n"
+        "2026-01-28T10:06:00,45,locked,\"\",\"\",\"\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+    g_assert_cmpint(stats->total_active_seconds, ==, 60);
+    g_assert_cmpint(stats->total_locked_seconds, ==, 345); /* 300 idle + 45 locked */
+    g_assert_cmpuint(stats->apps->len, ==, 1);
+
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
+static void test_stats_away_label(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+        "2026-01-28T10:00:00,60,active,\"Win\",\"App\",\"app\"\n"
+        "2026-01-28T10:01:00,300,idle,\"\",\"\",\"\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
+
+    g_assert_nonnull(strstr(output, "Away"));
+    g_assert_null(strstr(output, "Screen locked"));
+
+    g_free(output);
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
 /* ── grep filter ───────────────────────────────────────────── */
 
 static const gchar *grep_test_csv =
@@ -1069,6 +1142,7 @@ int main(int argc, char *argv[])
     g_test_add_func("/tracking/start_null_title", test_start_tracking_null_title);
     g_test_add_func("/emit/csv_active", test_emit_csv_active);
     g_test_add_func("/emit/csv_locked", test_emit_csv_locked);
+    g_test_add_func("/emit/csv_idle", test_emit_csv_idle);
     g_test_add_func("/emit/csv_skips_short_duration", test_emit_csv_skips_short_duration);
     g_test_add_func("/emit/csv_no_title", test_emit_csv_no_title);
     g_test_add_func("/parse/focused_window_found", test_parse_focused_window_found);
@@ -1106,6 +1180,10 @@ int main(int argc, char *argv[])
     g_test_add_func("/stats/format_long_app_name", test_format_long_app_name);
     g_test_add_func("/stats/format_long_window_title", test_format_long_window_title);
     g_test_add_func("/stats/no_line_overflow", test_no_line_overflow);
+
+    /* Idle stats tests */
+    g_test_add_func("/stats/idle_counted_as_away", test_stats_idle_counted_as_away);
+    g_test_add_func("/stats/away_label", test_stats_away_label);
 
     /* Grep filter tests */
     g_test_add_func("/stats/grep_app_name_match", test_grep_app_name_match);

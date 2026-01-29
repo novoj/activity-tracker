@@ -16,6 +16,8 @@ typedef struct {
     gint64 current_start;   /* monotonic time in microseconds */
     time_t current_wall;    /* wall clock at start */
     gboolean is_locked;
+    GDBusProxy *idle_proxy; /* Proxy to org.gnome.Mutter.IdleMonitor */
+    gboolean is_idle;       /* TRUE when user is idle */
     FILE *output_fp;        /* current output file handle */
     int file_year;          /* year of open file */
     int file_month;         /* month (1-12) of open file */

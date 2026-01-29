@@ -52,13 +52,14 @@ void emit_csv_to_buffer(GString *buf, AppState *state, gint64 now)
     char ts[32];
     format_iso8601(state->current_wall, ts, sizeof(ts));
 
+    gboolean away = state->is_locked || state->is_idle;
     const gchar *empty = "";
-    const gchar *title = state->is_locked ? empty : state->current_title;
-    const gchar *wm_class = state->is_locked ? empty : (state->current_wm_class ? state->current_wm_class : empty);
-    const gchar *wm_class_instance = state->is_locked ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
+    const gchar *title = away ? empty : state->current_title;
+    const gchar *wm_class = away ? empty : (state->current_wm_class ? state->current_wm_class : empty);
+    const gchar *wm_class_instance = away ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
+    const gchar *status = state->is_locked ? "locked" : (state->is_idle ? "idle" : "active");
 
-    g_string_append_printf(buf, "%s,%ld,%s,", ts, (long)duration_sec,
-                           state->is_locked ? "locked" : "active");
+    g_string_append_printf(buf, "%s,%ld,%s,", ts, (long)duration_sec, status);
     csv_escape_to_buffer(buf, title);
     g_string_append_c(buf, ',');
     csv_escape_to_buffer(buf, wm_class);
@@ -86,13 +87,14 @@ void emit_csv_line(AppState *state)
     char ts[32];
     format_iso8601(state->current_wall, ts, sizeof(ts));
 
+    gboolean away = state->is_locked || state->is_idle;
     const gchar *empty = "";
-    const gchar *title = state->is_locked ? empty : state->current_title;
-    const gchar *wm_class = state->is_locked ? empty : (state->current_wm_class ? state->current_wm_class : empty);
-    const gchar *wm_class_instance = state->is_locked ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
+    const gchar *title = away ? empty : state->current_title;
+    const gchar *wm_class = away ? empty : (state->current_wm_class ? state->current_wm_class : empty);
+    const gchar *wm_class_instance = away ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
+    const gchar *status = state->is_locked ? "locked" : (state->is_idle ? "idle" : "active");
 
-    fprintf(fp, "%s,%ld,%s,", ts, (long)duration_sec,
-            state->is_locked ? "locked" : "active");
+    fprintf(fp, "%s,%ld,%s,", ts, (long)duration_sec, status);
     csv_escape_and_print_fp(fp, title);
     fprintf(fp, ",");
     csv_escape_and_print_fp(fp, wm_class);
@@ -373,7 +375,7 @@ DayStats *compute_day_stats(const gchar *csv_path)
                             &wm_class, &wm_instance))
             continue;
 
-        if (g_strcmp0(status, "locked") == 0) {
+        if (g_strcmp0(status, "locked") == 0 || g_strcmp0(status, "idle") == 0) {
             stats->total_locked_seconds += duration;
         } else {
             stats->total_active_seconds += duration;
@@ -604,7 +606,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
 
     if (stats->total_locked_seconds > 0) {
         gchar *ld = format_duration(stats->total_locked_seconds);
-        fprintf(out, "%-*s %s\n", utf8_field_width("Screen locked", LABEL_WIDTH), "Screen locked", ld);
+        fprintf(out, "%-*s %s\n", utf8_field_width("Away", LABEL_WIDTH), "Away", ld);
         g_free(ld);
     }
 }

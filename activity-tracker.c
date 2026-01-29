@@ -21,6 +21,7 @@
 #include "tracker-core.h"
 
 #define POLL_INTERVAL_MS 1000
+#define IDLE_THRESHOLD_MS (5 * 60 * 1000)  /* 5 minutes */
 
 static FocusedWindowInfo query_active_window(AppState *state)
 {
@@ -88,11 +89,60 @@ static gboolean query_screensaver_active(AppState *state)
     return active;
 }
 
+static guint64 query_idle_time(AppState *state)
+{
+    if (!state->idle_proxy)
+        return 0;
+
+    GError *error = NULL;
+    GVariant *result = g_dbus_proxy_call_sync(
+        state->idle_proxy,
+        "GetIdletime",
+        NULL,
+        G_DBUS_CALL_FLAGS_NONE,
+        500,
+        NULL,
+        &error);
+
+    if (error) {
+        g_error_free(error);
+        return 0;
+    }
+
+    guint64 idle_ms = 0;
+    if (g_variant_is_of_type(result, G_VARIANT_TYPE("(t)")))
+        g_variant_get(result, "(t)", &idle_ms);
+    g_variant_unref(result);
+    return idle_ms;
+}
+
 static gboolean on_poll_timeout(gpointer user_data)
 {
     AppState *state = user_data;
 
     if (state->is_locked)
+        return G_SOURCE_CONTINUE;
+
+    guint64 idle_ms = query_idle_time(state);
+
+    if (idle_ms >= IDLE_THRESHOLD_MS && !state->is_idle) {
+        emit_csv_line(state);
+        state->is_idle = TRUE;
+        start_tracking(state, "", "", "", FALSE);
+        return G_SOURCE_CONTINUE;
+    }
+
+    if (idle_ms < IDLE_THRESHOLD_MS && state->is_idle) {
+        emit_csv_line(state);
+        state->is_idle = FALSE;
+        FocusedWindowInfo info = query_active_window(state);
+        start_tracking(state, info.title ? info.title : "",
+                       info.wm_class, info.wm_class_instance, FALSE);
+        free_focused_window_info(&info);
+        return G_SOURCE_CONTINUE;
+    }
+
+    if (state->is_idle)
         return G_SOURCE_CONTINUE;
 
     FocusedWindowInfo info = query_active_window(state);
@@ -125,11 +175,13 @@ static void on_screensaver_signal(GDBusConnection *connection G_GNUC_UNUSED,
     g_variant_get(parameters, "(b)", &active);
 
     if (active) {
-        /* Screen locked */
+        /* Screen locked — lock takes precedence over idle */
+        state->is_idle = FALSE;
         emit_csv_line(state);
         start_tracking(state, "", "", "", TRUE);
     } else {
-        /* Screen unlocked */
+        /* Screen unlocked — user just interacted */
+        state->is_idle = FALSE;
         emit_csv_line(state);
         /* Query current window to resume tracking */
         FocusedWindowInfo info = query_active_window(state);
@@ -250,6 +302,22 @@ static int run_tracker_mode(int lock_fd)
         goto cleanup;
     }
 
+    /* Create proxy for Mutter idle monitor (optional — graceful degradation) */
+    state.idle_proxy = g_dbus_proxy_new_sync(
+        state.connection,
+        G_DBUS_PROXY_FLAGS_NONE,
+        NULL,
+        "org.gnome.Mutter.IdleMonitor",
+        "/org/gnome/Mutter/IdleMonitor/Core",
+        "org.gnome.Mutter.IdleMonitor",
+        NULL,
+        &error);
+    if (error) {
+        g_warning("Idle monitor unavailable, idle detection disabled: %s",
+                  error->message);
+        g_clear_error(&error);
+    }
+
     /* Subscribe to screen lock signals */
     state.screensaver_signal_id = g_dbus_connection_signal_subscribe(
         state.connection,
@@ -273,6 +341,9 @@ static int run_tracker_mode(int lock_fd)
     gboolean initially_locked = query_screensaver_active(&state);
     if (initially_locked) {
         start_tracking(&state, "", "", "", TRUE);
+    } else if (query_idle_time(&state) >= IDLE_THRESHOLD_MS) {
+        state.is_idle = TRUE;
+        start_tracking(&state, "", "", "", FALSE);
     } else {
         FocusedWindowInfo info = query_active_window(&state);
         start_tracking(&state, info.title ? info.title : "",
@@ -295,6 +366,7 @@ cleanup:
     if (state.screensaver_signal_id)
         g_dbus_connection_signal_unsubscribe(state.connection,
                                              state.screensaver_signal_id);
+    g_clear_object(&state.idle_proxy);
     g_clear_object(&state.shell_proxy);
     g_clear_object(&state.connection);
     g_free(state.current_title);
