@@ -59,8 +59,9 @@ typedef struct {
 } DayStats;
 
 typedef struct {
-    int top_apps;    /* max apps to display (default 20) */
-    int top_titles;  /* max titles per app (default 5) */
+    int top_apps;              /* max apps to display (default 20) */
+    int top_titles;            /* max titles per app (default 5) */
+    const gchar *grep_pattern; /* regex filter, NULL = no filter */
 } StatsOptions;
 
 gchar *build_csv_path(const gchar *data_dir_override,
@@ -71,6 +72,8 @@ gboolean parse_csv_line(const gchar *line,
                         gchar **status, gchar **window_title,
                         gchar **wm_class, gchar **wm_class_instance);
 DayStats *compute_day_stats(const gchar *csv_path);
+DayStats *filter_stats_by_grep(const DayStats *stats, const gchar *pattern,
+                               GError **error);
 void print_stats_report(FILE *out, const DayStats *stats,
                         int year, int month, int day,
                         const StatsOptions *opts);

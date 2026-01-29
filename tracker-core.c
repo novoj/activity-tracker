@@ -416,6 +416,70 @@ DayStats *compute_day_stats(const gchar *csv_path)
     return stats;
 }
 
+DayStats *filter_stats_by_grep(const DayStats *stats, const gchar *pattern,
+                               GError **error)
+{
+    GRegex *regex = g_regex_new(pattern, G_REGEX_CASELESS, 0, error);
+    if (!regex)
+        return NULL;
+
+    DayStats *filtered = g_new0(DayStats, 1);
+    filtered->total_active_seconds = stats->total_active_seconds;
+    filtered->total_locked_seconds = stats->total_locked_seconds;
+    filtered->apps = g_ptr_array_new();
+
+    for (guint i = 0; i < stats->apps->len; i++) {
+        AppStat *app = g_ptr_array_index(stats->apps, i);
+        gboolean class_matches = g_regex_match(regex, app->wm_class, 0, NULL);
+
+        /* Collect matching titles */
+        AppStat *clone = NULL;
+        long clone_total = 0;
+        GHashTableIter titer;
+        gpointer tkey, tval;
+        g_hash_table_iter_init(&titer, app->titles);
+        while (g_hash_table_iter_next(&titer, &tkey, &tval)) {
+            if (g_regex_match(regex, (const gchar *)tkey, 0, NULL)) {
+                if (!clone) {
+                    clone = g_new0(AppStat, 1);
+                    clone->wm_class = g_strdup(app->wm_class);
+                    clone->titles = g_hash_table_new_full(
+                        g_str_hash, g_str_equal, g_free, g_free);
+                }
+                long *secs = g_new(long, 1);
+                *secs = *(long *)tval;
+                clone_total += *secs;
+                g_hash_table_insert(clone->titles,
+                                    g_strdup(tkey), secs);
+            }
+        }
+
+        if (clone) {
+            /* Title(s) matched: show only matching titles */
+            clone->total_seconds = clone_total;
+            g_ptr_array_add(filtered->apps, clone);
+        } else if (class_matches) {
+            /* App name matched but no titles did: clone all titles */
+            AppStat *full = g_new0(AppStat, 1);
+            full->wm_class = g_strdup(app->wm_class);
+            full->total_seconds = app->total_seconds;
+            full->titles = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, g_free);
+            g_hash_table_iter_init(&titer, app->titles);
+            while (g_hash_table_iter_next(&titer, &tkey, &tval)) {
+                long *secs = g_new(long, 1);
+                *secs = *(long *)tval;
+                g_hash_table_insert(full->titles, g_strdup(tkey), secs);
+            }
+            g_ptr_array_add(filtered->apps, full);
+        }
+    }
+
+    g_ptr_array_sort(filtered->apps, compare_app_stat_desc);
+    g_regex_unref(regex);
+    return filtered;
+}
+
 typedef struct {
     const gchar *title;
     long total_seconds;

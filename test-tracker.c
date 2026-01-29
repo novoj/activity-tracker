@@ -855,6 +855,206 @@ static void test_no_line_overflow(void)
     cleanup_test_tmpdir(tmpdir);
 }
 
+/* ── grep filter ───────────────────────────────────────────── */
+
+static const gchar *grep_test_csv =
+    "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+    "2026-01-28T10:00:00,60,active,\"Tab 1\",\"Firefox\",\"navigator\"\n"
+    "2026-01-28T10:01:00,30,active,\"Tab 2\",\"Firefox\",\"navigator\"\n"
+    "2026-01-28T10:02:00,120,active,\"Terminal\",\"Gnome-terminal\",\"gnome-terminal\"\n"
+    "2026-01-28T10:04:00,45,locked,\"\",\"\",\"\"\n"
+    "2026-01-28T10:05:00,10,active,\"GitHub - PR #42\",\"Chromium\",\"chromium\"\n"
+    "2026-01-28T10:06:00,200,active,\"Google Search\",\"Chromium\",\"chromium\"\n";
+
+static DayStats *grep_test_stats(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+    g_file_set_contents(csv_path, grep_test_csv, -1, NULL);
+    DayStats *stats = compute_day_stats(csv_path);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+    return stats;
+}
+
+static void test_grep_app_name_match(void)
+{
+    DayStats *stats = grep_test_stats();
+    DayStats *filtered = filter_stats_by_grep(stats, "Firefox", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 1);
+    AppStat *app = g_ptr_array_index(filtered->apps, 0);
+    g_assert_cmpstr(app->wm_class, ==, "Firefox");
+    g_assert_cmpint(app->total_seconds, ==, 90);
+    /* All titles preserved when app name matches */
+    g_assert_cmpuint(g_hash_table_size(app->titles), ==, 2);
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_title_match_only(void)
+{
+    DayStats *stats = grep_test_stats();
+    DayStats *filtered = filter_stats_by_grep(stats, "GitHub", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 1);
+    AppStat *app = g_ptr_array_index(filtered->apps, 0);
+    g_assert_cmpstr(app->wm_class, ==, "Chromium");
+    /* Only the matching title's seconds */
+    g_assert_cmpint(app->total_seconds, ==, 10);
+    g_assert_cmpuint(g_hash_table_size(app->titles), ==, 1);
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_case_insensitive(void)
+{
+    DayStats *stats = grep_test_stats();
+    DayStats *filtered = filter_stats_by_grep(stats, "firefox", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 1);
+    AppStat *app = g_ptr_array_index(filtered->apps, 0);
+    g_assert_cmpstr(app->wm_class, ==, "Firefox");
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_no_matches(void)
+{
+    DayStats *stats = grep_test_stats();
+    DayStats *filtered = filter_stats_by_grep(stats, "Nonexistent", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 0);
+    /* Totals preserved even when nothing matches */
+    g_assert_cmpint(filtered->total_active_seconds, ==, stats->total_active_seconds);
+    g_assert_cmpint(filtered->total_locked_seconds, ==, stats->total_locked_seconds);
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_invalid_regex(void)
+{
+    DayStats *stats = grep_test_stats();
+    GError *error = NULL;
+    DayStats *filtered = filter_stats_by_grep(stats, "[invalid", &error);
+
+    g_assert_null(filtered);
+    g_assert_nonnull(error);
+
+    g_error_free(error);
+    free_day_stats(stats);
+}
+
+static void test_grep_matches_both_app_and_title(void)
+{
+    /* Create data where an app name and a title both match */
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+        "2026-01-28T10:00:00,60,active,\"Firefox Start Page\",\"Firefox\",\"navigator\"\n"
+        "2026-01-28T10:01:00,30,active,\"Google Search\",\"Firefox\",\"navigator\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+    DayStats *stats = compute_day_stats(csv_path);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+
+    /* App name "Firefox" matches AND title "Firefox Start Page" matches,
+       so only the matching title should be included */
+    DayStats *filtered = filter_stats_by_grep(stats, "Firefox", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 1);
+    AppStat *app = g_ptr_array_index(filtered->apps, 0);
+    g_assert_cmpint(app->total_seconds, ==, 60);
+    g_assert_cmpuint(g_hash_table_size(app->titles), ==, 1);
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_with_top_n(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    /* Create 4 apps, grep will match 3 */
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+        "2026-01-28T10:00:00,100,active,\"Win\",\"AppMatch1\",\"inst\"\n"
+        "2026-01-28T10:01:00,80,active,\"Win\",\"AppMatch2\",\"inst\"\n"
+        "2026-01-28T10:02:00,60,active,\"Win\",\"AppMatch3\",\"inst\"\n"
+        "2026-01-28T10:03:00,200,active,\"Win\",\"NoHit\",\"inst\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+    DayStats *stats = compute_day_stats(csv_path);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+
+    DayStats *filtered = filter_stats_by_grep(stats, "AppMatch", NULL);
+    g_assert_cmpuint(filtered->apps->len, ==, 3);
+
+    /* With top_apps=2, should show 2 apps + "1 other" */
+    StatsOptions opts = { .top_apps = 2, .top_titles = 5, .grep_pattern = NULL };
+    gchar *output = capture_stats_output(filtered, 2026, 1, 28, &opts);
+
+    g_assert_nonnull(strstr(output, "1 other application"));
+    g_assert_nonnull(strstr(output, "  1."));
+    g_assert_nonnull(strstr(output, "  2."));
+    g_assert_null(strstr(output, "  3."));
+
+    g_free(output);
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_empty_pattern(void)
+{
+    DayStats *stats = grep_test_stats();
+    DayStats *filtered = filter_stats_by_grep(stats, "", NULL);
+
+    g_assert_nonnull(filtered);
+    /* Empty regex matches everything */
+    g_assert_cmpuint(filtered->apps->len, ==, stats->apps->len);
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
+static void test_grep_regex_features(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n"
+        "2026-01-28T10:00:00,60,active,\"Win\",\"Firefox\",\"navigator\"\n"
+        "2026-01-28T10:01:00,30,active,\"Win\",\"NotFirefox\",\"inst\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+    DayStats *stats = compute_day_stats(csv_path);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+
+    /* ^Fire should match "Firefox" but not "NotFirefox" */
+    DayStats *filtered = filter_stats_by_grep(stats, "^Fire", NULL);
+
+    g_assert_nonnull(filtered);
+    g_assert_cmpuint(filtered->apps->len, ==, 1);
+    AppStat *app = g_ptr_array_index(filtered->apps, 0);
+    g_assert_cmpstr(app->wm_class, ==, "Firefox");
+
+    free_day_stats(filtered);
+    free_day_stats(stats);
+}
+
 /* ── main ──────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[])
@@ -906,6 +1106,17 @@ int main(int argc, char *argv[])
     g_test_add_func("/stats/format_long_app_name", test_format_long_app_name);
     g_test_add_func("/stats/format_long_window_title", test_format_long_window_title);
     g_test_add_func("/stats/no_line_overflow", test_no_line_overflow);
+
+    /* Grep filter tests */
+    g_test_add_func("/stats/grep_app_name_match", test_grep_app_name_match);
+    g_test_add_func("/stats/grep_title_match_only", test_grep_title_match_only);
+    g_test_add_func("/stats/grep_case_insensitive", test_grep_case_insensitive);
+    g_test_add_func("/stats/grep_no_matches", test_grep_no_matches);
+    g_test_add_func("/stats/grep_invalid_regex", test_grep_invalid_regex);
+    g_test_add_func("/stats/grep_matches_both_app_and_title", test_grep_matches_both_app_and_title);
+    g_test_add_func("/stats/grep_with_top_n", test_grep_with_top_n);
+    g_test_add_func("/stats/grep_empty_pattern", test_grep_empty_pattern);
+    g_test_add_func("/stats/grep_regex_features", test_grep_regex_features);
 
     return g_test_run();
 }

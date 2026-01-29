@@ -198,6 +198,19 @@ static int run_stats_mode(int year, int month, int day,
         return 1;
     }
 
+    if (opts->grep_pattern) {
+        GError *error = NULL;
+        DayStats *filtered = filter_stats_by_grep(stats, opts->grep_pattern,
+                                                   &error);
+        free_day_stats(stats);
+        if (!filtered) {
+            g_printerr("Invalid grep pattern: %s\n", error->message);
+            g_error_free(error);
+            return 1;
+        }
+        stats = filtered;
+    }
+
     print_stats_report(stdout, stats, year, month, day, opts);
     free_day_stats(stats);
     return 0;
@@ -310,6 +323,7 @@ static void print_usage(const char *prog)
         "  -d, --date YYYY-MM-DD    Report for a specific date (default: today)\n"
         "  -n, --top-apps N         Number of applications to show (default: 20)\n"
         "  -t, --top-titles N       Window titles per application (default: 5)\n"
+        "  -g, --grep PATTERN       Filter by regex on app names and titles\n"
         "  -h, --help               Show this help message\n",
         prog);
 }
@@ -330,19 +344,20 @@ int main(int argc, char *argv[])
 {
     gboolean explicit_stats = FALSE;
     const char *date_str = NULL;
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .grep_pattern = NULL };
 
     static struct option long_options[] = {
         {"stats",      no_argument,       NULL, 's'},
         {"date",       required_argument, NULL, 'd'},
         {"top-apps",   required_argument, NULL, 'n'},
         {"top-titles", required_argument, NULL, 't'},
+        {"grep",       required_argument, NULL, 'g'},
         {"help",       no_argument,       NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "sd:n:t:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "sd:n:t:g:h", long_options, NULL)) != -1) {
         switch (opt) {
         case 's':
             explicit_stats = TRUE;
@@ -373,6 +388,10 @@ int main(int argc, char *argv[])
             opts.top_titles = (int)val;
             break;
         }
+        case 'g':
+            opts.grep_pattern = optarg;
+            explicit_stats = TRUE;
+            break;
         case 'h':
             print_usage(argv[0]);
             return 0;
