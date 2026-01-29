@@ -445,6 +445,16 @@ static gchar *truncate_label(const gchar *str, int max_chars)
     return result;
 }
 
+/* Return printf field width adjusted for multi-byte UTF-8 overhead.
+ * printf %-*s pads by byte count, so we add the difference between
+ * byte length and character length to compensate. */
+static int utf8_field_width(const gchar *str, int desired_columns)
+{
+    size_t bytes = strlen(str);
+    glong chars = g_utf8_strlen(str, -1);
+    return desired_columns + (int)(bytes - (size_t)chars);
+}
+
 void print_stats_report(FILE *out, const DayStats *stats,
                         int year, int month, int day,
                         const StatsOptions *opts)
@@ -465,7 +475,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
         AppStat *app = g_ptr_array_index(stats->apps, i);
         gchar *dur = format_duration(app->total_seconds);
         gchar *name = truncate_label(app->wm_class, LABEL_WIDTH - 5);
-        fprintf(out, "%3u. %-*s %s\n", i + 1, LABEL_WIDTH - 5, name, dur);
+        fprintf(out, "%3u. %-*s %s\n", i + 1, utf8_field_width(name, LABEL_WIDTH - 5), name, dur);
         g_free(name);
         g_free(dur);
 
@@ -489,7 +499,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
             if (j < title_display) {
                 gchar *td = format_duration(te->total_seconds);
                 gchar *trunc = truncate_label(te->title, LABEL_WIDTH - 7);
-                fprintf(out, "       %-*s %s\n", LABEL_WIDTH - 7, trunc, td);
+                fprintf(out, "       %-*s %s\n", utf8_field_width(trunc, LABEL_WIDTH - 7), trunc, td);
                 g_free(trunc);
                 g_free(td);
             } else {
@@ -502,7 +512,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
             gchar *label = g_strdup_printf("%u other windows",
                                            title_count - title_display);
             gchar *trunc = truncate_label(label, LABEL_WIDTH - 7);
-            fprintf(out, "       %-*s %s\n", LABEL_WIDTH - 7, trunc, od);
+            fprintf(out, "       %-*s %s\n", utf8_field_width(trunc, LABEL_WIDTH - 7), trunc, od);
             g_free(trunc);
             g_free(label);
             g_free(od);
@@ -522,7 +532,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
         gchar *label = g_strdup_printf("%u other applications",
                                        app_count - (guint)top_apps);
         gchar *trunc = truncate_label(label, LABEL_WIDTH - 2);
-        fprintf(out, "  %-*s %s\n\n", LABEL_WIDTH - 2, trunc, od);
+        fprintf(out, "  %-*s %s\n\n", utf8_field_width(trunc, LABEL_WIDTH - 2), trunc, od);
         g_free(trunc);
         g_free(label);
         g_free(od);
@@ -530,7 +540,7 @@ void print_stats_report(FILE *out, const DayStats *stats,
 
     if (stats->total_locked_seconds > 0) {
         gchar *ld = format_duration(stats->total_locked_seconds);
-        fprintf(out, "%-*s %s\n", LABEL_WIDTH, "Screen locked", ld);
+        fprintf(out, "%-*s %s\n", utf8_field_width("Screen locked", LABEL_WIDTH), "Screen locked", ld);
         g_free(ld);
     }
 }
