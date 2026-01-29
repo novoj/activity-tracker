@@ -59,12 +59,19 @@ void emit_csv_to_buffer(GString *buf, AppState *state, gint64 now)
     const gchar *wm_class_instance = away ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
     const gchar *status = state->is_locked ? "locked" : (state->is_idle ? "idle" : "active");
 
+    const gchar *rp_state = away ? empty : (state->current_rp_state ? state->current_rp_state : empty);
+    const gchar *rp_details = away ? empty : (state->current_rp_details ? state->current_rp_details : empty);
+
     g_string_append_printf(buf, "%s,%ld,%s,", ts, (long)duration_sec, status);
     csv_escape_to_buffer(buf, title);
     g_string_append_c(buf, ',');
     csv_escape_to_buffer(buf, wm_class);
     g_string_append_c(buf, ',');
     csv_escape_to_buffer(buf, wm_class_instance);
+    g_string_append_c(buf, ',');
+    csv_escape_to_buffer(buf, rp_state);
+    g_string_append_c(buf, ',');
+    csv_escape_to_buffer(buf, rp_details);
     g_string_append_c(buf, '\n');
 }
 
@@ -94,12 +101,19 @@ void emit_csv_line(AppState *state)
     const gchar *wm_class_instance = away ? empty : (state->current_wm_class_instance ? state->current_wm_class_instance : empty);
     const gchar *status = state->is_locked ? "locked" : (state->is_idle ? "idle" : "active");
 
+    const gchar *rp_state = away ? empty : (state->current_rp_state ? state->current_rp_state : empty);
+    const gchar *rp_details = away ? empty : (state->current_rp_details ? state->current_rp_details : empty);
+
     fprintf(fp, "%s,%ld,%s,", ts, (long)duration_sec, status);
     csv_escape_and_print_fp(fp, title);
     fprintf(fp, ",");
     csv_escape_and_print_fp(fp, wm_class);
     fprintf(fp, ",");
     csv_escape_and_print_fp(fp, wm_class_instance);
+    fprintf(fp, ",");
+    csv_escape_and_print_fp(fp, rp_state);
+    fprintf(fp, ",");
+    csv_escape_and_print_fp(fp, rp_details);
     fprintf(fp, "\n");
     fflush(fp);
     fsync(fileno(fp));
@@ -107,7 +121,8 @@ void emit_csv_line(AppState *state)
 
 void start_tracking(AppState *state, const gchar *title,
                     const gchar *wm_class, const gchar *wm_class_instance,
-                    gboolean locked)
+                    const gchar *rp_state, const gchar *rp_details,
+                    pid_t pid, gboolean locked)
 {
     g_free(state->current_title);
     state->current_title = g_strdup(title ? title : "");
@@ -115,6 +130,11 @@ void start_tracking(AppState *state, const gchar *title,
     state->current_wm_class = g_strdup(wm_class ? wm_class : "");
     g_free(state->current_wm_class_instance);
     state->current_wm_class_instance = g_strdup(wm_class_instance ? wm_class_instance : "");
+    g_free(state->current_rp_state);
+    state->current_rp_state = g_strdup(rp_state ? rp_state : "");
+    g_free(state->current_rp_details);
+    state->current_rp_details = g_strdup(rp_details ? rp_details : "");
+    state->current_pid = pid;
     state->current_start = g_get_monotonic_time();
     state->current_wall = time(NULL);
     state->is_locked = locked;
@@ -168,7 +188,7 @@ gboolean ensure_output_file(AppState *state, time_t wall_time)
 
     if (ftell(state->output_fp) == 0) {
         fprintf(state->output_fp,
-                "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n");
+                "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance,rp_state,rp_details\n");
         fflush(state->output_fp);
         fsync(fileno(state->output_fp));
     }
@@ -197,7 +217,7 @@ void close_output_file(AppState *state)
 
 FocusedWindowInfo parse_focused_window(const gchar *json)
 {
-    FocusedWindowInfo info = {NULL, NULL, NULL};
+    FocusedWindowInfo info = {NULL, NULL, NULL, 0};
 
     if (!json || !json[0])
         return info;
@@ -238,6 +258,8 @@ FocusedWindowInfo parse_focused_window(const gchar *json)
                 if (ci)
                     info.wm_class_instance = g_strdup(ci);
             }
+            if (json_object_has_member(obj, "pid"))
+                info.pid = (pid_t)json_object_get_int_member(obj, "pid");
             break;
         }
     }
@@ -254,6 +276,7 @@ void free_focused_window_info(FocusedWindowInfo *info)
     info->title = NULL;
     info->wm_class = NULL;
     info->wm_class_instance = NULL;
+    info->pid = 0;
 }
 
 /* ── Statistics functions ──────────────────────────────── */
@@ -315,7 +338,8 @@ static gchar *extract_csv_field(const gchar *line, gsize *pos)
 gboolean parse_csv_line(const gchar *line,
                         gchar **timestamp, long *duration,
                         gchar **status, gchar **window_title,
-                        gchar **wm_class, gchar **wm_class_instance)
+                        gchar **wm_class, gchar **wm_class_instance,
+                        gchar **rp_state, gchar **rp_details)
 {
     if (!line || !line[0])
         return FALSE;
@@ -336,12 +360,23 @@ gboolean parse_csv_line(const gchar *line,
         return FALSE;
     }
 
+    /* Parse optional rich presence fields (backward compatible with old CSVs) */
+    gchar *f_rp_state = NULL;
+    gchar *f_rp_details = NULL;
+    if (line[pos]) {
+        f_rp_state = extract_csv_field(line, &pos);
+        if (line[pos])
+            f_rp_details = extract_csv_field(line, &pos);
+    }
+
     *timestamp = f_ts;
     *duration = dur;
     *status = f_status;
     *window_title = f_title;
     *wm_class = f_class;
     *wm_class_instance = f_instance;
+    *rp_state = f_rp_state ? f_rp_state : g_strdup("");
+    *rp_details = f_rp_details ? f_rp_details : g_strdup("");
     g_free(f_dur);
     return TRUE;
 }
@@ -370,9 +405,10 @@ DayStats *compute_day_stats(const gchar *csv_path)
             continue;
 
         gchar *ts, *status, *title, *wm_class, *wm_instance;
+        gchar *rps, *rpd;
         long duration;
         if (!parse_csv_line(lines[i], &ts, &duration, &status, &title,
-                            &wm_class, &wm_instance))
+                            &wm_class, &wm_instance, &rps, &rpd))
             continue;
 
         if (g_strcmp0(status, "locked") == 0 || g_strcmp0(status, "idle") == 0) {
@@ -390,18 +426,33 @@ DayStats *compute_day_stats(const gchar *csv_path)
             }
             app->total_seconds += duration;
 
-            long *title_secs = g_hash_table_lookup(app->titles, title);
+            /* Build display key: use rich presence if available, else window title */
+            gchar *display_key;
+            gboolean has_rps = rps && rps[0];
+            gboolean has_rpd = rpd && rpd[0];
+            if (has_rps && has_rpd)
+                display_key = g_strdup_printf("%s | %s", rps, rpd);
+            else if (has_rps)
+                display_key = g_strdup(rps);
+            else if (has_rpd)
+                display_key = g_strdup(rpd);
+            else
+                display_key = g_strdup(title);
+
+            long *title_secs = g_hash_table_lookup(app->titles, display_key);
             if (title_secs) {
                 *title_secs += duration;
+                g_free(display_key);
             } else {
                 long *new_secs = g_new(long, 1);
                 *new_secs = duration;
-                g_hash_table_insert(app->titles, g_strdup(title), new_secs);
+                g_hash_table_insert(app->titles, display_key, new_secs);
             }
         }
 
         g_free(ts); g_free(status); g_free(title);
         g_free(wm_class); g_free(wm_instance);
+        g_free(rps); g_free(rpd);
     }
 
     stats->apps = g_ptr_array_new();

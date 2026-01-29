@@ -55,7 +55,7 @@ static void test_csv_escape_empty(void)
 static void test_start_tracking(void)
 {
     AppState state = {0};
-    start_tracking(&state, "My Window", "MyApp", "myapp", FALSE);
+    start_tracking(&state, "My Window", "MyApp", "myapp", NULL, NULL, 0, FALSE);
 
     g_assert_cmpstr(state.current_title, ==, "My Window");
     g_assert_cmpstr(state.current_wm_class, ==, "MyApp");
@@ -72,7 +72,7 @@ static void test_start_tracking(void)
 static void test_start_tracking_null_title(void)
 {
     AppState state = {0};
-    start_tracking(&state, NULL, NULL, NULL, TRUE);
+    start_tracking(&state, NULL, NULL, NULL, NULL, NULL, 0, TRUE);
 
     g_assert_cmpstr(state.current_title, ==, "");
     g_assert_cmpstr(state.current_wm_class, ==, "");
@@ -100,8 +100,8 @@ static void test_emit_csv_active(void)
     /* now = 5 seconds after start */
     emit_csv_to_buffer(buf, &state, 5 * G_USEC_PER_SEC);
 
-    /* Should contain: timestamp,5,active,"Firefox","Firefox","navigator"\n */
-    g_assert_true(g_str_has_suffix(buf->str, ",5,active,\"Firefox\",\"Firefox\",\"navigator\"\n"));
+    /* Should contain: timestamp,5,active,"Firefox","Firefox","navigator","",""\n */
+    g_assert_true(g_str_has_suffix(buf->str, ",5,active,\"Firefox\",\"Firefox\",\"navigator\",\"\",\"\"\n"));
     g_assert_cmpuint(buf->len, >, 30);
 
     g_string_free(buf, TRUE);
@@ -123,7 +123,7 @@ static void test_emit_csv_locked(void)
     GString *buf = g_string_new(NULL);
     emit_csv_to_buffer(buf, &state, 10 * G_USEC_PER_SEC);
 
-    g_assert_true(g_str_has_suffix(buf->str, ",10,locked,\"\",\"\",\"\"\n"));
+    g_assert_true(g_str_has_suffix(buf->str, ",10,locked,\"\",\"\",\"\",\"\",\"\"\n"));
 
     g_string_free(buf, TRUE);
     g_free(state.current_title);
@@ -178,7 +178,7 @@ static void test_emit_csv_idle(void)
     GString *buf = g_string_new(NULL);
     emit_csv_to_buffer(buf, &state, 10 * G_USEC_PER_SEC);
 
-    g_assert_true(g_str_has_suffix(buf->str, ",10,idle,\"\",\"\",\"\"\n"));
+    g_assert_true(g_str_has_suffix(buf->str, ",10,idle,\"\",\"\",\"\",\"\",\"\"\n"));
 
     g_string_free(buf, TRUE);
     g_free(state.current_title);
@@ -522,11 +522,11 @@ static void test_format_duration_large(void)
 
 static void test_parse_csv_simple(void)
 {
-    gchar *ts, *status, *title, *cls, *inst;
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
     long dur;
     gboolean ok = parse_csv_line(
         "2026-01-28T10:00:00,120,active,\"Firefox\",\"Firefox\",\"navigator\"",
-        &ts, &dur, &status, &title, &cls, &inst);
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
     g_assert_true(ok);
     g_assert_cmpstr(ts, ==, "2026-01-28T10:00:00");
     g_assert_cmpint(dur, ==, 120);
@@ -535,53 +535,53 @@ static void test_parse_csv_simple(void)
     g_assert_cmpstr(cls, ==, "Firefox");
     g_assert_cmpstr(inst, ==, "navigator");
     g_free(ts); g_free(status); g_free(title);
-    g_free(cls); g_free(inst);
+    g_free(cls); g_free(inst); g_free(rps); g_free(rpd);
 }
 
 static void test_parse_csv_quoted_title(void)
 {
-    gchar *ts, *status, *title, *cls, *inst;
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
     long dur;
     gboolean ok = parse_csv_line(
         "2026-01-28T10:00:00,60,active,\"Say \"\"hello\"\"\",\"App\",\"app\"",
-        &ts, &dur, &status, &title, &cls, &inst);
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
     g_assert_true(ok);
     g_assert_cmpstr(title, ==, "Say \"hello\"");
     g_free(ts); g_free(status); g_free(title);
-    g_free(cls); g_free(inst);
+    g_free(cls); g_free(inst); g_free(rps); g_free(rpd);
 }
 
 static void test_parse_csv_header_line(void)
 {
-    gchar *ts, *status, *title, *cls, *inst;
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
     long dur;
     gboolean ok = parse_csv_line(
         "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance",
-        &ts, &dur, &status, &title, &cls, &inst);
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
     g_assert_false(ok);
 }
 
 static void test_parse_csv_locked(void)
 {
-    gchar *ts, *status, *title, *cls, *inst;
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
     long dur;
     gboolean ok = parse_csv_line(
         "2026-01-28T12:00:00,300,locked,\"\",\"\",\"\"",
-        &ts, &dur, &status, &title, &cls, &inst);
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
     g_assert_true(ok);
     g_assert_cmpstr(status, ==, "locked");
     g_assert_cmpstr(title, ==, "");
     g_assert_cmpint(dur, ==, 300);
     g_free(ts); g_free(status); g_free(title);
-    g_free(cls); g_free(inst);
+    g_free(cls); g_free(inst); g_free(rps); g_free(rpd);
 }
 
 static void test_parse_csv_empty_line(void)
 {
-    gchar *ts, *status, *title, *cls, *inst;
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
     long dur;
-    g_assert_false(parse_csv_line("", &ts, &dur, &status, &title, &cls, &inst));
-    g_assert_false(parse_csv_line(NULL, &ts, &dur, &status, &title, &cls, &inst));
+    g_assert_false(parse_csv_line("", &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd));
+    g_assert_false(parse_csv_line(NULL, &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd));
 }
 
 /* ── build_csv_path ───────────────────────────────────────── */
@@ -1128,6 +1128,119 @@ static void test_grep_regex_features(void)
     free_day_stats(stats);
 }
 
+/* ── parse focused window PID ──────────────────────────────── */
+
+static void test_parse_focused_window_pid(void)
+{
+    const gchar *json =
+        "[{\"id\":1,\"pid\":12345,\"title\":\"IntelliJ IDEA\",\"wm_class\":\"jetbrains-idea\","
+         "\"wm_class_instance\":\"jetbrains-idea\",\"focus\":true}]";
+    FocusedWindowInfo info = parse_focused_window(json);
+    g_assert_cmpstr(info.title, ==, "IntelliJ IDEA");
+    g_assert_cmpint(info.pid, ==, 12345);
+    free_focused_window_info(&info);
+}
+
+/* ── CSV backward compat & rich presence ──────────────────── */
+
+static void test_parse_csv_backward_compat(void)
+{
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
+    long dur;
+    gboolean ok = parse_csv_line(
+        "2026-01-28T10:00:00,120,active,\"Firefox\",\"Firefox\",\"navigator\"",
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
+    g_assert_true(ok);
+    g_assert_cmpstr(rps, ==, "");
+    g_assert_cmpstr(rpd, ==, "");
+    g_free(ts); g_free(status); g_free(title);
+    g_free(cls); g_free(inst); g_free(rps); g_free(rpd);
+}
+
+static void test_parse_csv_with_rich_presence(void)
+{
+    gchar *ts, *status, *title, *cls, *inst, *rps, *rpd;
+    long dur;
+    gboolean ok = parse_csv_line(
+        "2026-01-28T10:00:00,120,active,\"IntelliJ\",\"jetbrains-idea\",\"jetbrains-idea\",\"Editing Main.java\",\"my-project\"",
+        &ts, &dur, &status, &title, &cls, &inst, &rps, &rpd);
+    g_assert_true(ok);
+    g_assert_cmpstr(rps, ==, "Editing Main.java");
+    g_assert_cmpstr(rpd, ==, "my-project");
+    g_free(ts); g_free(status); g_free(title);
+    g_free(cls); g_free(inst); g_free(rps); g_free(rpd);
+}
+
+/* ── compute_day_stats with rich presence ─────────────────── */
+
+static void test_compute_day_stats_rich_presence(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance,rp_state,rp_details\n"
+        "2026-01-28T10:00:00,60,active,\"Main.java - IntelliJ\",\"jetbrains-idea\",\"jetbrains-idea\",\"Editing Main.java\",\"my-project\"\n"
+        "2026-01-28T10:01:00,30,active,\"Util.java - IntelliJ\",\"jetbrains-idea\",\"jetbrains-idea\",\"Editing Main.java\",\"my-project\"\n"
+        "2026-01-28T10:02:00,120,active,\"Terminal\",\"Gnome-terminal\",\"gnome-terminal\",\"\",\"\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+    g_assert_cmpint(stats->total_active_seconds, ==, 210);
+
+    AppStat *idea = NULL;
+    AppStat *term = NULL;
+    for (guint i = 0; i < stats->apps->len; i++) {
+        AppStat *app = g_ptr_array_index(stats->apps, i);
+        if (g_strcmp0(app->wm_class, "jetbrains-idea") == 0) idea = app;
+        if (g_strcmp0(app->wm_class, "Gnome-terminal") == 0) term = app;
+    }
+
+    g_assert_nonnull(idea);
+    g_assert_cmpint(idea->total_seconds, ==, 90);
+    g_assert_cmpuint(g_hash_table_size(idea->titles), ==, 1);
+    g_assert_nonnull(g_hash_table_lookup(idea->titles, "Editing Main.java | my-project"));
+
+    g_assert_nonnull(term);
+    g_assert_cmpint(term->total_seconds, ==, 120);
+    g_assert_cmpuint(g_hash_table_size(term->titles), ==, 1);
+    g_assert_nonnull(g_hash_table_lookup(term->titles, "Terminal"));
+
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
+/* ── emit CSV with rich presence ──────────────────────────── */
+
+static void test_emit_csv_with_rich_presence(void)
+{
+    AppState state = {0};
+    state.current_title = g_strdup("Main.java - IntelliJ");
+    state.current_wm_class = g_strdup("jetbrains-idea");
+    state.current_wm_class_instance = g_strdup("jetbrains-idea");
+    state.current_rp_state = g_strdup("Editing Main.java");
+    state.current_rp_details = g_strdup("my-project");
+    state.current_wall = 1705311000;
+    state.current_start = 0;
+    state.is_locked = FALSE;
+
+    GString *buf = g_string_new(NULL);
+    emit_csv_to_buffer(buf, &state, 5 * G_USEC_PER_SEC);
+
+    g_assert_true(g_str_has_suffix(buf->str,
+        ",5,active,\"Main.java - IntelliJ\",\"jetbrains-idea\",\"jetbrains-idea\","
+        "\"Editing Main.java\",\"my-project\"\n"));
+
+    g_string_free(buf, TRUE);
+    g_free(state.current_title);
+    g_free(state.current_wm_class);
+    g_free(state.current_wm_class_instance);
+    g_free(state.current_rp_state);
+    g_free(state.current_rp_details);
+}
+
 /* ── main ──────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[])
@@ -1145,6 +1258,7 @@ int main(int argc, char *argv[])
     g_test_add_func("/emit/csv_idle", test_emit_csv_idle);
     g_test_add_func("/emit/csv_skips_short_duration", test_emit_csv_skips_short_duration);
     g_test_add_func("/emit/csv_no_title", test_emit_csv_no_title);
+    g_test_add_func("/emit/csv_with_rich_presence", test_emit_csv_with_rich_presence);
     g_test_add_func("/parse/focused_window_found", test_parse_focused_window_found);
     g_test_add_func("/parse/focused_window_none", test_parse_focused_window_none);
     g_test_add_func("/parse/focused_window_empty_array", test_parse_focused_window_empty_array);
@@ -1152,6 +1266,7 @@ int main(int argc, char *argv[])
     g_test_add_func("/parse/focused_window_null", test_parse_focused_window_null);
     g_test_add_func("/parse/focused_window_empty_string", test_parse_focused_window_empty_string);
     g_test_add_func("/parse/focused_window_missing_wm_fields", test_parse_focused_window_missing_wm_fields);
+    g_test_add_func("/parse/focused_window_pid", test_parse_focused_window_pid);
     g_test_add_func("/file/ensure_output_creates", test_ensure_output_creates);
     g_test_add_func("/file/ensure_output_same_date", test_ensure_output_same_date);
     g_test_add_func("/file/ensure_output_date_rotation", test_ensure_output_date_rotation);
@@ -1170,11 +1285,14 @@ int main(int argc, char *argv[])
     g_test_add_func("/stats/parse_csv_header_line", test_parse_csv_header_line);
     g_test_add_func("/stats/parse_csv_locked", test_parse_csv_locked);
     g_test_add_func("/stats/parse_csv_empty_line", test_parse_csv_empty_line);
+    g_test_add_func("/stats/parse_csv_backward_compat", test_parse_csv_backward_compat);
+    g_test_add_func("/stats/parse_csv_with_rich_presence", test_parse_csv_with_rich_presence);
     g_test_add_func("/stats/build_csv_path", test_build_csv_path);
     g_test_add_func("/stats/build_csv_path_padding", test_build_csv_path_padding);
     g_test_add_func("/stats/compute_day_stats", test_compute_day_stats);
     g_test_add_func("/stats/compute_day_stats_empty", test_compute_day_stats_empty);
     g_test_add_func("/stats/compute_day_stats_nonexistent", test_compute_day_stats_nonexistent);
+    g_test_add_func("/stats/compute_day_stats_rich_presence", test_compute_day_stats_rich_presence);
     g_test_add_func("/stats/top_apps_limit", test_stats_top_apps_limit);
     g_test_add_func("/stats/top_titles_limit", test_stats_top_titles_limit);
     g_test_add_func("/stats/format_long_app_name", test_format_long_app_name);

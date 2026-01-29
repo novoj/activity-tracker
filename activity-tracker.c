@@ -19,13 +19,16 @@
 #include <getopt.h>
 
 #include "tracker-core.h"
+#include "discord-ipc.h"
 
 #define POLL_INTERVAL_MS 1000
 #define IDLE_THRESHOLD_MS (5 * 60 * 1000)  /* 5 minutes */
 
+static DiscordIpcState discord_state;
+
 static FocusedWindowInfo query_active_window(AppState *state)
 {
-    FocusedWindowInfo info = {NULL, NULL, NULL};
+    FocusedWindowInfo info = {NULL, NULL, NULL, 0};
 
     if (!state->shell_proxy)
         return info;
@@ -128,7 +131,7 @@ static gboolean on_poll_timeout(gpointer user_data)
     if (idle_ms >= IDLE_THRESHOLD_MS && !state->is_idle) {
         emit_csv_line(state);
         state->is_idle = TRUE;
-        start_tracking(state, "", "", "", FALSE);
+        start_tracking(state, "", "", "", NULL, NULL, 0, FALSE);
         return G_SOURCE_CONTINUE;
     }
 
@@ -137,7 +140,8 @@ static gboolean on_poll_timeout(gpointer user_data)
         state->is_idle = FALSE;
         FocusedWindowInfo info = query_active_window(state);
         start_tracking(state, info.title ? info.title : "",
-                       info.wm_class, info.wm_class_instance, FALSE);
+                       info.wm_class, info.wm_class_instance,
+                       NULL, NULL, info.pid, FALSE);
         free_focused_window_info(&info);
         return G_SOURCE_CONTINUE;
     }
@@ -151,9 +155,28 @@ static gboolean on_poll_timeout(gpointer user_data)
         return G_SOURCE_CONTINUE;
     }
 
-    if (!state->current_title || g_strcmp0(state->current_title, info.title) != 0) {
+    /* Look up rich presence data for this window's PID */
+    const gchar *rp_state = NULL;
+    const gchar *rp_details = NULL;
+    if (info.pid > 0 && discord_state.active) {
+        const RichPresenceEntry *rp = discord_ipc_lookup_pid(&discord_state, info.pid);
+        if (rp) {
+            rp_state = rp->state;
+            rp_details = rp->details;
+        }
+    }
+
+    gboolean title_changed = !state->current_title ||
+                              g_strcmp0(state->current_title, info.title) != 0;
+    gboolean rp_changed = g_strcmp0(state->current_rp_state ? state->current_rp_state : "",
+                                    rp_state ? rp_state : "") != 0 ||
+                           g_strcmp0(state->current_rp_details ? state->current_rp_details : "",
+                                    rp_details ? rp_details : "") != 0;
+
+    if (title_changed || rp_changed) {
         emit_csv_line(state);
-        start_tracking(state, info.title, info.wm_class, info.wm_class_instance, FALSE);
+        start_tracking(state, info.title, info.wm_class, info.wm_class_instance,
+                       rp_state, rp_details, info.pid, FALSE);
     }
 
     free_focused_window_info(&info);
@@ -178,7 +201,7 @@ static void on_screensaver_signal(GDBusConnection *connection G_GNUC_UNUSED,
         /* Screen locked — lock takes precedence over idle */
         state->is_idle = FALSE;
         emit_csv_line(state);
-        start_tracking(state, "", "", "", TRUE);
+        start_tracking(state, "", "", "", NULL, NULL, 0, TRUE);
     } else {
         /* Screen unlocked — user just interacted */
         state->is_idle = FALSE;
@@ -186,7 +209,8 @@ static void on_screensaver_signal(GDBusConnection *connection G_GNUC_UNUSED,
         /* Query current window to resume tracking */
         FocusedWindowInfo info = query_active_window(state);
         start_tracking(state, info.title ? info.title : "",
-                       info.wm_class, info.wm_class_instance, FALSE);
+                       info.wm_class, info.wm_class_instance,
+                       NULL, NULL, info.pid, FALSE);
         free_focused_window_info(&info);
     }
 }
@@ -331,6 +355,10 @@ static int run_tracker_mode(int lock_fd)
         &state,
         NULL);
 
+    /* Set up Discord IPC proxy (optional — graceful degradation) */
+    if (!discord_ipc_setup(&discord_state))
+        g_printerr("Discord IPC proxy not available, rich presence disabled\n");
+
     /* Open initial output file */
     if (!ensure_output_file(&state, time(NULL))) {
         g_printerr("Failed to open output file\n");
@@ -340,14 +368,15 @@ static int run_tracker_mode(int lock_fd)
     /* Initialize tracking with current state */
     gboolean initially_locked = query_screensaver_active(&state);
     if (initially_locked) {
-        start_tracking(&state, "", "", "", TRUE);
+        start_tracking(&state, "", "", "", NULL, NULL, 0, TRUE);
     } else if (query_idle_time(&state) >= IDLE_THRESHOLD_MS) {
         state.is_idle = TRUE;
-        start_tracking(&state, "", "", "", FALSE);
+        start_tracking(&state, "", "", "", NULL, NULL, 0, FALSE);
     } else {
         FocusedWindowInfo info = query_active_window(&state);
         start_tracking(&state, info.title ? info.title : "",
-                       info.wm_class, info.wm_class_instance, FALSE);
+                       info.wm_class, info.wm_class_instance,
+                       NULL, NULL, info.pid, FALSE);
         free_focused_window_info(&info);
     }
 
@@ -362,6 +391,7 @@ static int run_tracker_mode(int lock_fd)
     ret = 0;
 
 cleanup:
+    discord_ipc_cleanup(&discord_state);
     close_output_file(&state);
     if (state.screensaver_signal_id)
         g_dbus_connection_signal_unsubscribe(state.connection,
@@ -372,6 +402,8 @@ cleanup:
     g_free(state.current_title);
     g_free(state.current_wm_class);
     g_free(state.current_wm_class_instance);
+    g_free(state.current_rp_state);
+    g_free(state.current_rp_details);
     g_main_loop_unref(state.loop);
     if (lock_fd >= 0)
         close(lock_fd);

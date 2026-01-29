@@ -23,12 +23,16 @@ typedef struct {
     int file_month;         /* month (1-12) of open file */
     int file_day;           /* day (1-31) of open file */
     const gchar *data_dir;  /* override for g_get_user_data_dir(), NULL = default */
+    gchar *current_rp_state;   /* Discord rich presence state */
+    gchar *current_rp_details; /* Discord rich presence details */
+    pid_t current_pid;         /* PID of current focused window */
 } AppState;
 
 typedef struct {
     gchar *title;
     gchar *wm_class;
     gchar *wm_class_instance;
+    pid_t pid;
 } FocusedWindowInfo;
 
 void format_iso8601(time_t t, char *buf, size_t len);
@@ -38,7 +42,8 @@ void emit_csv_to_buffer(GString *buf, AppState *state, gint64 now);
 void emit_csv_line(AppState *state);
 void start_tracking(AppState *state, const gchar *title,
                     const gchar *wm_class, const gchar *wm_class_instance,
-                    gboolean locked);
+                    const gchar *rp_state, const gchar *rp_details,
+                    pid_t pid, gboolean locked);
 FocusedWindowInfo parse_focused_window(const gchar *json);
 void free_focused_window_info(FocusedWindowInfo *info);
 
@@ -72,7 +77,8 @@ gchar *format_duration(long seconds);
 gboolean parse_csv_line(const gchar *line,
                         gchar **timestamp, long *duration,
                         gchar **status, gchar **window_title,
-                        gchar **wm_class, gchar **wm_class_instance);
+                        gchar **wm_class, gchar **wm_class_instance,
+                        gchar **rp_state, gchar **rp_details);
 DayStats *compute_day_stats(const gchar *csv_path);
 DayStats *filter_stats_by_grep(const DayStats *stats, const gchar *pattern,
                                GError **error);

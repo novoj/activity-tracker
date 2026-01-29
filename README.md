@@ -128,18 +128,56 @@ CSV with the following columns:
 | `duration_seconds` | integer | Seconds spent in this interval |
 | `status` | `active` or `locked` | Whether the user was active or AFK |
 | `window_title` | quoted string | Title of the focused window (empty when locked) |
+| `wm_class` | quoted string | WM class of the focused window |
+| `wm_class_instance` | quoted string | WM class instance of the focused window |
+| `rp_state` | quoted string | Discord Rich Presence state (if available) |
+| `rp_details` | quoted string | Discord Rich Presence details (if available) |
 
 Example output:
 
 ```csv
-timestamp,duration_seconds,status,window_title
-2026-01-28T14:30:05,307,active,"Firefox - Google"
-2026-01-28T14:35:12,120,locked,""
-2026-01-28T14:37:12,45,active,"Terminal - bash"
+timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance,rp_state,rp_details
+2026-01-28T14:30:05,307,active,"Firefox - Google","Firefox","navigator","",""
+2026-01-28T14:35:12,120,locked,"","","","",""
+2026-01-28T14:37:12,45,active,"Main.java - IntelliJ","jetbrains-idea","jetbrains-idea","Editing Main.java","my-project"
 ```
+
+## Discord Rich Presence Integration
+
+Activity-tracker can intercept Discord IPC to capture rich presence data from applications like IDEs, providing more meaningful activity labels (e.g., "Editing Main.java | my-project" instead of a raw window title).
+
+### How it works
+
+On startup, the tracker hijacks the Discord IPC socket (`$XDG_RUNTIME_DIR/discord-ipc-0`):
+
+- **Proxy mode** (Discord running): The original socket is renamed and the tracker creates its own socket at the same path. All data is forwarded bidirectionally between clients (IDEs, games) and Discord while intercepting `SET_ACTIVITY` messages.
+- **Passive mode** (Discord not running): The tracker creates the socket and emulates Discord's handshake so applications still send their rich presence data.
+
+When a `SET_ACTIVITY` command is received, the tracker extracts the PID, state, and details. If the PID matches the currently focused window, the rich presence `state` and `details` are recorded alongside the window data in the CSV.
+
+On shutdown (`SIGINT`/`SIGTERM`), the original Discord socket is restored so Discord rich presence continues working normally. Stale/zombie sockets from previous crashes are automatically detected and cleaned up.
+
+### Statistics display
+
+When rich presence data is available for an application, the activity report groups by `state | details` instead of window titles. This collapses multiple window title changes (e.g., switching between files in an IDE) into a single, meaningful entry:
+
+```
+  1. jetbrains-idea                              2h 15m 30s
+       Editing Main.java | my-project            1h 45m 00s
+       Browsing | my-project                      0h 30m 30s
+
+  2. firefox                                      0h 45m 10s
+       GitHub - Pull Request #42                  0h 30m 00s
+       Stack Overflow - How to...                 0h 15m 10s
+```
+
+### Recommended plugins
+
+For IntelliJ IDEA, install the [Discord Rich Presence](https://plugins.jetbrains.com/plugin/24027-discord-rich-presence) plugin to send activity data through the Discord IPC socket.
 
 ## Limitations
 
 - **GNOME Shell + Window Calls extension required** - The application uses the Window Calls GNOME Shell extension's D-Bus interface. This will not work on KDE Plasma, Sway, Hyprland, or other Wayland compositors, and the extension must be installed and enabled.
 - **Requires active D-Bus session** - Must be run within a graphical session with access to the session bus.
 - **1-second granularity** - Window changes shorter than 1 second may not be captured.
+- **Discord IPC socket order** - The tracker should be started after Discord. If Discord starts after the tracker, it may create its socket at `discord-ipc-1` instead of `discord-ipc-0`.

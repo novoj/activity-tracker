@@ -2,20 +2,27 @@ CC = gcc
 CFLAGS = $(shell pkg-config --cflags gio-2.0 gio-unix-2.0 json-glib-1.0) -Wall -Wextra -O2
 LDFLAGS = $(shell pkg-config --libs gio-2.0 gio-unix-2.0 json-glib-1.0)
 
-activity-tracker: activity-tracker.c tracker-core.o
-	$(CC) $(CFLAGS) -o $@ activity-tracker.c tracker-core.o $(LDFLAGS)
+activity-tracker: activity-tracker.c tracker-core.o discord-ipc.o
+	$(CC) $(CFLAGS) -o $@ activity-tracker.c tracker-core.o discord-ipc.o $(LDFLAGS)
 
 tracker-core.o: tracker-core.c tracker-core.h
 	$(CC) $(CFLAGS) -c -o $@ tracker-core.c
 
+discord-ipc.o: discord-ipc.c discord-ipc.h tracker-core.h
+	$(CC) $(CFLAGS) -c -o $@ discord-ipc.c
+
 test-tracker: test-tracker.c tracker-core.o
 	$(CC) $(CFLAGS) -o $@ test-tracker.c tracker-core.o $(LDFLAGS)
 
-test: test-tracker
+test-discord-ipc: test-discord-ipc.c discord-ipc.o tracker-core.o
+	$(CC) $(CFLAGS) -o $@ test-discord-ipc.c discord-ipc.o tracker-core.o $(LDFLAGS)
+
+test: test-tracker test-discord-ipc
 	./test-tracker
+	./test-discord-ipc
 
 clean:
-	rm -f activity-tracker test-tracker tracker-core.o
+	rm -f activity-tracker test-tracker test-discord-ipc tracker-core.o discord-ipc.o
 
 .PHONY: clean test
 
