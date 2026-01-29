@@ -18,3 +18,17 @@ clean:
 	rm -f activity-tracker test-tracker tracker-core.o
 
 .PHONY: clean test
+
+RESTART_BIN = activity-tracker
+
+restart: activity-tracker
+	@if pkill -0 -f ./$(RESTART_BIN) 2>/dev/null; then \
+		echo "Stopping existing $(RESTART_BIN)..."; \
+		pkill -f ./$(RESTART_BIN); \
+		while pkill -0 -f ./$(RESTART_BIN) 2>/dev/null; do \
+			sleep 0.1; \
+		done; \
+		echo "Process stopped and locks released."; \
+	fi
+	@echo "Starting new version..."
+	@./$(RESTART_BIN) &
