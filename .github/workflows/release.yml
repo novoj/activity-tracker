@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libjson-glib-dev pkg-config
+
+      - name: Build (x86_64)
+        run: make
+
+      - name: Test
+        run: make test
+
+      - name: Rename x86_64 binary
+        run: mv activity-tracker activity-tracker-linux-x86_64
+
+      - name: Setup ARM64 cross-compilation
+        run: |
+          sudo dpkg --add-architecture arm64
+
+          # Add arm64 sources (ports.ubuntu.com) for Ubuntu Noble
+          sudo tee /etc/apt/sources.list.d/arm64-cross.list > /dev/null <<'EOF'
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main universe
+          EOF
+
+          # Restrict existing sources to amd64 to avoid conflicts
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Architectures:.*/Architectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+            # If no Architectures line exists, add one after each Types line
+            if ! grep -q '^Architectures:' /etc/apt/sources.list.d/ubuntu.sources; then
+              sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+          fi
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i 's/^deb \([^[]\)/deb [arch=amd64] \1/' /etc/apt/sources.list
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu \
+            libglib2.0-dev:arm64 libjson-glib-dev:arm64
+
+      - name: Build (ARM64)
+        run: |
+          make clean
+          make CC=aarch64-linux-gnu-gcc PKG_CONFIG=aarch64-linux-gnu-pkg-config
+          mv activity-tracker activity-tracker-linux-arm64
+
+      - name: Compute release tag
+        id: tag
+        run: |
+          YEAR=$(date -u +%Y)
+          MONTH=$(date -u +%m)
+          PREFIX="v${YEAR}-${MONTH}-"
+
+          LATEST=$(git tag -l "${PREFIX}*" --sort=-version:refname | head -1)
+
+          if [ -z "$LATEST" ]; then
+            VERSION=1
+          else
+            VERSION=$(echo "$LATEST" | sed "s/^${PREFIX}//")
+            VERSION=$((VERSION + 1))
+          fi
+
+          TAG="${PREFIX}${VERSION}"
+          TITLE="${YEAR}.${MONTH}.${VERSION}"
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+
+          if [ -z "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s (%h)" > /tmp/release-notes.txt
+          else
+            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > /tmp/release-notes.txt
+          fi
+
+      - name: Create tag
+        run: |
+          git tag "${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "${{ steps.tag.outputs.title }}" \
+            --notes-file /tmp/release-notes.txt \
+            activity-tracker-linux-x86_64 \
+            activity-tracker-linux-arm64

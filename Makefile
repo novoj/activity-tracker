@@ -1,6 +1,7 @@
 CC = gcc
-CFLAGS = $(shell pkg-config --cflags gio-2.0 gio-unix-2.0 json-glib-1.0) -Wall -Wextra -O2
-LDFLAGS = $(shell pkg-config --libs gio-2.0 gio-unix-2.0 json-glib-1.0)
+PKG_CONFIG ?= pkg-config
+CFLAGS = $(shell $(PKG_CONFIG) --cflags gio-2.0 gio-unix-2.0 json-glib-1.0) -Wall -Wextra -O2
+LDFLAGS = $(shell $(PKG_CONFIG) --libs gio-2.0 gio-unix-2.0 json-glib-1.0)
 
 activity-tracker: activity-tracker.c tracker-core.o discord-ipc.o
 	$(CC) $(CFLAGS) -o $@ activity-tracker.c tracker-core.o discord-ipc.o $(LDFLAGS)
