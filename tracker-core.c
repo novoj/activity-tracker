@@ -417,6 +417,12 @@ DayStats *compute_day_stats(const gchar *csv_path)
         if (g_strcmp0(status, "locked") == 0 || g_strcmp0(status, "idle") == 0) {
             stats->total_locked_seconds += duration;
         } else {
+            gboolean has_title = title && title[0];
+            gboolean has_rps = rps && rps[0];
+            gboolean has_rpd = rpd && rpd[0];
+            if (!has_title && !has_rps && !has_rpd) {
+                stats->total_afk_active_seconds += duration;
+            } else {
             stats->total_active_seconds += duration;
 
             AppStat *app = g_hash_table_lookup(app_map, wm_class);
@@ -451,6 +457,7 @@ DayStats *compute_day_stats(const gchar *csv_path)
                 *new_secs = duration;
                 g_hash_table_insert(app->titles, display_key, new_secs);
             }
+            }
         }
 
         g_free(ts); g_free(status); g_free(title);
@@ -482,6 +489,7 @@ DayStats *filter_stats_by_grep(const DayStats *stats, const gchar *pattern,
     DayStats *filtered = g_new0(DayStats, 1);
     filtered->total_active_seconds = stats->total_active_seconds;
     filtered->total_locked_seconds = stats->total_locked_seconds;
+    filtered->total_afk_active_seconds = stats->total_afk_active_seconds;
     filtered->apps = g_ptr_array_new();
 
     for (guint i = 0; i < stats->apps->len; i++) {
@@ -607,11 +615,14 @@ void print_stats_report(FILE *out, const DayStats *stats,
     int cols = (opts && opts->cols >= MIN_COLS) ? opts->cols : DEFAULT_COLS;
     int label_width = cols - 1 - DURATION_WIDTH;
 
-    long total = stats->total_active_seconds + stats->total_locked_seconds;
+    long total = stats->total_active_seconds + stats->total_locked_seconds
+                  + stats->total_afk_active_seconds;
     gchar *total_dur = format_duration(total);
+    gchar *active_dur = format_duration(stats->total_active_seconds);
     fprintf(out, "Activity Report for %04d-%02d-%02d\n", year, month, day);
-    fprintf(out, "Total tracked: %s\n\n", total_dur);
+    fprintf(out, "Total tracked: %s (active: %s)\n\n", total_dur, active_dur);
     g_free(total_dur);
+    g_free(active_dur);
 
     guint app_count = stats->apps->len;
     guint display_count = (guint)MIN((int)app_count, top_apps);

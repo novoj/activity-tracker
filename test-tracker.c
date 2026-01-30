@@ -1355,6 +1355,37 @@ static void test_compute_day_stats_rich_presence(void)
     cleanup_test_tmpdir(tmpdir);
 }
 
+/* ── compute_day_stats with AFK active records ────────────── */
+
+static void test_compute_day_stats_afk_active(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    const gchar *csv =
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance,rp_state,rp_details\n"
+        "2026-01-28T10:00:00,60,active,\"Terminal\",\"Gnome-terminal\",\"gnome-terminal\",\"\",\"\"\n"
+        "2026-01-28T10:01:00,30,active,\"\",\"\",\"\",\"\",\"\"\n"
+        "2026-01-28T10:02:00,20,active,\"\",\"jetbrains-idea\",\"jetbrains-idea\",\"Editing Main.java\",\"my-project\"\n"
+        "2026-01-28T10:03:00,45,locked,\"\",\"\",\"\",\"\",\"\"\n";
+    g_file_set_contents(csv_path, csv, -1, NULL);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+    /* 60s terminal + 20s with rich presence = 80s active */
+    g_assert_cmpint(stats->total_active_seconds, ==, 80);
+    /* 30s empty title+RP = AFK active */
+    g_assert_cmpint(stats->total_afk_active_seconds, ==, 30);
+    /* 45s locked */
+    g_assert_cmpint(stats->total_locked_seconds, ==, 45);
+    /* Only 2 apps (terminal + jetbrains), not the empty one */
+    g_assert_cmpuint(stats->apps->len, ==, 2);
+
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
 /* ── emit CSV with rich presence ──────────────────────────── */
 
 static void test_emit_csv_with_rich_presence(void)
@@ -1437,6 +1468,7 @@ int main(int argc, char *argv[])
     g_test_add_func("/stats/compute_day_stats_empty", test_compute_day_stats_empty);
     g_test_add_func("/stats/compute_day_stats_nonexistent", test_compute_day_stats_nonexistent);
     g_test_add_func("/stats/compute_day_stats_rich_presence", test_compute_day_stats_rich_presence);
+    g_test_add_func("/stats/compute_day_stats_afk_active", test_compute_day_stats_afk_active);
     g_test_add_func("/stats/top_apps_limit", test_stats_top_apps_limit);
     g_test_add_func("/stats/top_titles_limit", test_stats_top_titles_limit);
     g_test_add_func("/stats/format_long_app_name", test_format_long_app_name);

@@ -62,6 +62,7 @@ typedef struct {
 typedef struct {
     long total_active_seconds;
     long total_locked_seconds;
+    long total_afk_active_seconds; /* active status but empty title + empty RP */
     GPtrArray *apps; /* AppStat*, sorted descending by total_seconds */
 } DayStats;
 
