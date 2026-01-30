@@ -1,9 +1,12 @@
+#define _XOPEN_SOURCE 700
 #include <glib.h>
 #include "tracker-core.h"
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <locale.h>
 
 /* ── format_iso8601 ────────────────────────────────────────── */
 
@@ -754,6 +757,19 @@ static void test_stats_top_titles_limit(void)
 
 /* ── truncation / overflow protection ─────────────────────── */
 
+/* Compute display width of a UTF-8 string (same logic as tracker-core's
+ * utf8_display_width, duplicated here so tests don't depend on internals). */
+static int test_display_width(const char *str)
+{
+    int width = 0;
+    for (const gchar *p = str; *p; p = g_utf8_next_char(p)) {
+        int w = wcwidth((wchar_t)g_utf8_get_char(p));
+        if (w > 0)
+            width += w;
+    }
+    return width;
+}
+
 static void test_format_long_app_name(void)
 {
     gchar *tmpdir = create_test_tmpdir();
@@ -780,12 +796,12 @@ static void test_format_long_app_name(void)
     /* Verify app name is truncated with "..." */
     g_assert_nonnull(strstr(output, "..."));
 
-    /* Verify no output line exceeds a reasonable width */
+    /* Verify no output line exceeds 80 display columns */
     gchar **lines = g_strsplit(output, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 84);
+        g_assert_cmpint(test_display_width(lines[i]), <=, 80);
     }
     g_strfreev(lines);
 
@@ -821,12 +837,12 @@ static void test_format_long_window_title(void)
     /* Verify title is truncated with "..." */
     g_assert_nonnull(strstr(output, "..."));
 
-    /* Verify no output line exceeds a reasonable width */
+    /* Verify no output line exceeds 80 display columns */
     gchar **lines = g_strsplit(output, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 84);
+        g_assert_cmpint(test_display_width(lines[i]), <=, 80);
     }
     g_strfreev(lines);
 
@@ -862,12 +878,139 @@ static void test_no_line_overflow(void)
     StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
-    /* No line should be excessively long */
+    /* No line should exceed 80 display columns */
     gchar **lines = g_strsplit(output, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 84);
+        g_assert_cmpint(test_display_width(lines[i]), <=, 80);
+    }
+    g_strfreev(lines);
+
+    g_free(output);
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
+/* ── emoji display width ──────────────────────────────────── */
+
+static void test_emoji_line_width(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    GString *csv = g_string_new(
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n");
+    /* Title with star emoji (⭐ = U+2B50, 2 display cols) */
+    g_string_append(csv,
+        "2026-01-28T10:00:00,60,active,\"⭐ My Project\",\"Code\",\"code\"\n");
+    /* Title with ZWJ emoji (👨🏻‍🚀 = multiple codepoints, 2 display cols) */
+    g_string_append(csv,
+        "2026-01-28T10:01:00,60,active,\"👨🏻‍🚀 Space App\",\"Firefox\",\"firefox\"\n");
+    g_file_set_contents(csv_path, csv->str, -1, NULL);
+    g_string_free(csv, TRUE);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
+    gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
+
+    gchar **lines = g_strsplit(output, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        if (lines[i][0] == '\0')
+            continue;
+        g_assert_cmpint(test_display_width(lines[i]), <=, 80);
+    }
+    g_strfreev(lines);
+
+    g_free(output);
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
+static void test_emoji_truncation(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    /* Build a title of 60 star emojis (120 display cols — will need truncation) */
+    GString *title = g_string_new(NULL);
+    for (int i = 0; i < 60; i++)
+        g_string_append(title, "⭐");
+
+    GString *csv = g_string_new(
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n");
+    g_string_append_printf(csv,
+        "2026-01-28T10:00:00,60,active,\"%s\",\"App\",\"app\"\n", title->str);
+    g_file_set_contents(csv_path, csv->str, -1, NULL);
+    g_string_free(csv, TRUE);
+    g_string_free(title, TRUE);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
+    gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
+
+    /* Should be truncated with "..." */
+    g_assert_nonnull(strstr(output, "..."));
+
+    /* All lines fit within 80 display columns */
+    gchar **lines = g_strsplit(output, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        if (lines[i][0] == '\0')
+            continue;
+        g_assert_cmpint(test_display_width(lines[i]), <=, 80);
+    }
+    g_strfreev(lines);
+
+    g_free(output);
+    free_day_stats(stats);
+    g_free(csv_path);
+    cleanup_test_tmpdir(tmpdir);
+}
+
+static void test_zwj_emoji_alignment(void)
+{
+    gchar *tmpdir = create_test_tmpdir();
+    gchar *csv_path = g_strdup_printf("%s/test.csv", tmpdir);
+
+    GString *csv = g_string_new(
+        "timestamp,duration_seconds,status,window_title,wm_class,wm_class_instance\n");
+    /* One entry with ZWJ emoji, one without */
+    g_string_append(csv,
+        "2026-01-28T10:00:00,60,active,\"👨🏻‍🚀 Rocket\",\"AppA\",\"appa\"\n");
+    g_string_append(csv,
+        "2026-01-28T10:01:00,60,active,\"Normal Title\",\"AppB\",\"appb\"\n");
+    g_file_set_contents(csv_path, csv->str, -1, NULL);
+    g_string_free(csv, TRUE);
+
+    DayStats *stats = compute_day_stats(csv_path);
+    g_assert_nonnull(stats);
+
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
+    gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
+
+    /* Find the app summary lines (start with a digit for ranking) and check
+     * that they have the same display width when both are short enough
+     * not to be truncated. */
+    gchar **lines = g_strsplit(output, "\n", -1);
+    int prev_width = -1;
+    for (int i = 0; lines[i]; i++) {
+        if (lines[i][0] == '\0')
+            continue;
+        int dw = test_display_width(lines[i]);
+        g_assert_cmpint(dw, <=, 80);
+        /* App summary lines start with a space then a digit */
+        if (strlen(lines[i]) >= 2 && lines[i][0] == ' ' &&
+            g_ascii_isdigit(lines[i][1])) {
+            if (prev_width >= 0)
+                g_assert_cmpint(dw, ==, prev_width);
+            prev_width = dw;
+        }
     }
     g_strfreev(lines);
 
@@ -1245,6 +1388,7 @@ static void test_emit_csv_with_rich_presence(void)
 
 int main(int argc, char *argv[])
 {
+    setlocale(LC_CTYPE, "");
     g_test_init(&argc, &argv, NULL);
 
     g_test_add_func("/format/iso8601", test_format_iso8601);
@@ -1298,6 +1442,9 @@ int main(int argc, char *argv[])
     g_test_add_func("/stats/format_long_app_name", test_format_long_app_name);
     g_test_add_func("/stats/format_long_window_title", test_format_long_window_title);
     g_test_add_func("/stats/no_line_overflow", test_no_line_overflow);
+    g_test_add_func("/stats/emoji_line_width", test_emoji_line_width);
+    g_test_add_func("/stats/emoji_truncation", test_emoji_truncation);
+    g_test_add_func("/stats/zwj_emoji_alignment", test_zwj_emoji_alignment);
 
     /* Idle stats tests */
     g_test_add_func("/stats/idle_counted_as_away", test_stats_idle_counted_as_away);

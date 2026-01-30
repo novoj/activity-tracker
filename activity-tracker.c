@@ -17,6 +17,7 @@
 #include <sys/file.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <locale.h>
 
 #include "tracker-core.h"
 #include "discord-ipc.h"
@@ -447,6 +448,7 @@ static gboolean parse_date(const char *str, int *year, int *month, int *day)
 
 int main(int argc, char *argv[])
 {
+    setlocale(LC_CTYPE, "");
     gboolean explicit_stats = FALSE;
     const char *date_str = NULL;
     StatsOptions opts = { .top_apps = 20, .top_titles = 5, .grep_pattern = NULL, .cols = 80 };

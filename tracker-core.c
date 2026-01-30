@@ -1,9 +1,12 @@
+#define _XOPEN_SOURCE 700
 #include "tracker-core.h"
 #include <json-glib/json-glib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <locale.h>
 
 void format_iso8601(time_t t, char *buf, size_t len)
 {
@@ -550,26 +553,49 @@ static gint compare_title_entry_desc(gconstpointer a, gconstpointer b)
 #define DEFAULT_COLS 80
 #define MIN_COLS     40
 
-/* Truncate a UTF-8 string to fit within max_chars, appending "..." if needed.
- * Returns a newly allocated string. */
-static gchar *truncate_label(const gchar *str, int max_chars)
+/* Return the display width of a UTF-8 string in terminal columns.
+ * Uses wcwidth() per codepoint: wide chars (emoji, CJK) return 2,
+ * zero-width joiners and combining marks return 0. */
+static int utf8_display_width(const gchar *str)
 {
-    if ((int)g_utf8_strlen(str, -1) <= max_chars)
+    int width = 0;
+    for (const gchar *p = str; *p; p = g_utf8_next_char(p)) {
+        int w = wcwidth((wchar_t)g_utf8_get_char(p));
+        if (w > 0)
+            width += w;
+    }
+    return width;
+}
+
+/* Truncate a UTF-8 string to fit within max_cols display columns,
+ * appending "..." if needed.  Returns a newly allocated string. */
+static gchar *truncate_label(const gchar *str, int max_cols)
+{
+    if (utf8_display_width(str) <= max_cols)
         return g_strdup(str);
-    gchar *sub = g_utf8_substring(str, 0, max_chars - 3);
+    int width = 0;
+    const gchar *p = str;
+    const gchar *cut = p;
+    while (*p) {
+        int w = wcwidth((wchar_t)g_utf8_get_char(p));
+        if (w < 0) w = 0;
+        if (width + w > max_cols - 3) break;
+        width += w;
+        p = g_utf8_next_char(p);
+        cut = p;
+    }
+    gchar *sub = g_strndup(str, cut - str);
     gchar *result = g_strdup_printf("%s...", sub);
     g_free(sub);
     return result;
 }
 
-/* Return printf field width adjusted for multi-byte UTF-8 overhead.
+/* Return printf field width adjusted for display-width vs byte-length.
  * printf %-*s pads by byte count, so we add the difference between
- * byte length and character length to compensate. */
+ * byte length and display width to compensate. */
 static int utf8_field_width(const gchar *str, int desired_columns)
 {
-    size_t bytes = strlen(str);
-    glong chars = g_utf8_strlen(str, -1);
-    return desired_columns + (int)(bytes - (size_t)chars);
+    return desired_columns + (int)strlen(str) - utf8_display_width(str);
 }
 
 void print_stats_report(FILE *out, const DayStats *stats,
