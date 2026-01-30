@@ -704,7 +704,7 @@ static void test_stats_top_apps_limit(void)
     g_assert_nonnull(stats);
     g_assert_cmpuint(stats->apps->len, ==, 5);
 
-    StatsOptions opts = { .top_apps = 2, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 2, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     /* Should show "3 other applications" */
@@ -740,7 +740,7 @@ static void test_stats_top_titles_limit(void)
     DayStats *stats = compute_day_stats(csv_path);
     g_assert_nonnull(stats);
 
-    StatsOptions opts = { .top_apps = 20, .top_titles = 1 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 1, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     /* Should show "4 other windows" */
@@ -774,7 +774,7 @@ static void test_format_long_app_name(void)
     DayStats *stats = compute_day_stats(csv_path);
     g_assert_nonnull(stats);
 
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     /* Verify app name is truncated with "..." */
@@ -785,7 +785,7 @@ static void test_format_long_app_name(void)
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 60);
+        g_assert_cmpuint(strlen(lines[i]), <=, 84);
     }
     g_strfreev(lines);
 
@@ -815,7 +815,7 @@ static void test_format_long_window_title(void)
     DayStats *stats = compute_day_stats(csv_path);
     g_assert_nonnull(stats);
 
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     /* Verify title is truncated with "..." */
@@ -826,7 +826,7 @@ static void test_format_long_window_title(void)
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 60);
+        g_assert_cmpuint(strlen(lines[i]), <=, 84);
     }
     g_strfreev(lines);
 
@@ -859,7 +859,7 @@ static void test_no_line_overflow(void)
     DayStats *stats = compute_day_stats(csv_path);
     g_assert_nonnull(stats);
 
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     /* No line should be excessively long */
@@ -867,7 +867,7 @@ static void test_no_line_overflow(void)
     for (int i = 0; lines[i]; i++) {
         if (lines[i][0] == '\0')
             continue;
-        g_assert_cmpuint(strlen(lines[i]), <=, 60);
+        g_assert_cmpuint(strlen(lines[i]), <=, 84);
     }
     g_strfreev(lines);
 
@@ -916,7 +916,7 @@ static void test_stats_away_label(void)
     DayStats *stats = compute_day_stats(csv_path);
     g_assert_nonnull(stats);
 
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5 };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .cols = 80 };
     gchar *output = capture_stats_output(stats, 2026, 1, 28, &opts);
 
     g_assert_nonnull(strstr(output, "Away"));
@@ -1076,7 +1076,7 @@ static void test_grep_with_top_n(void)
     g_assert_cmpuint(filtered->apps->len, ==, 3);
 
     /* With top_apps=2, should show 2 apps + "1 other" */
-    StatsOptions opts = { .top_apps = 2, .top_titles = 5, .grep_pattern = NULL };
+    StatsOptions opts = { .top_apps = 2, .top_titles = 5, .grep_pattern = NULL, .cols = 80 };
     gchar *output = capture_stats_output(filtered, 2026, 1, 28, &opts);
 
     g_assert_nonnull(strstr(output, "1 other application"));

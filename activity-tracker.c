@@ -428,6 +428,7 @@ static void print_usage(const char *prog)
         "  -n, --top-apps N         Number of applications to show (default: 20)\n"
         "  -t, --top-titles N       Window titles per application (default: 5)\n"
         "  -g, --grep PATTERN       Filter by regex on app names and titles\n"
+        "  -c, --cols N             Output width in columns (default: 80)\n"
         "  -h, --help               Show this help message\n",
         prog);
 }
@@ -448,7 +449,7 @@ int main(int argc, char *argv[])
 {
     gboolean explicit_stats = FALSE;
     const char *date_str = NULL;
-    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .grep_pattern = NULL };
+    StatsOptions opts = { .top_apps = 20, .top_titles = 5, .grep_pattern = NULL, .cols = 80 };
 
     static struct option long_options[] = {
         {"stats",      no_argument,       NULL, 's'},
@@ -456,12 +457,13 @@ int main(int argc, char *argv[])
         {"top-apps",   required_argument, NULL, 'n'},
         {"top-titles", required_argument, NULL, 't'},
         {"grep",       required_argument, NULL, 'g'},
+        {"cols",       required_argument, NULL, 'c'},
         {"help",       no_argument,       NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "sd:n:t:g:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "sd:n:t:g:c:h", long_options, NULL)) != -1) {
         switch (opt) {
         case 's':
             explicit_stats = TRUE;
@@ -496,6 +498,17 @@ int main(int argc, char *argv[])
             opts.grep_pattern = optarg;
             explicit_stats = TRUE;
             break;
+        case 'c': {
+            char *endptr;
+            errno = 0;
+            long val = strtol(optarg, &endptr, 10);
+            if (errno || *endptr != '\0' || val < 40 || val > INT_MAX) {
+                g_printerr("--cols must be an integer >= 40\n");
+                return 1;
+            }
+            opts.cols = (int)val;
+            break;
+        }
         case 'h':
             print_usage(argv[0]);
             return 0;

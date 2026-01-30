@@ -47,10 +47,11 @@ activity-tracker --date 2026-01-27  # Show report for a specific date
 activity-tracker --top-apps 5   # Show only top 5 applications (default: 20)
 activity-tracker --top-titles 2 # Show only top 2 window titles per app (default: 5)
 activity-tracker --grep firefox # Show only apps/titles matching "firefox" (regex, case-insensitive)
+activity-tracker --cols 120     # Set output width to 120 columns (default: 80)
 activity-tracker --help         # Show help message
 ```
 
-Short flags: `-s` (stats), `-d` (date), `-n` (top-apps), `-t` (top-titles), `-g` (grep), `-h` (help).
+Short flags: `-s` (stats), `-d` (date), `-n` (top-apps), `-t` (top-titles), `-g` (grep), `-c` (cols), `-h` (help).
 
 Only one instance can track at a time (enforced via `flock()` on a lock file). A second instance automatically shows the activity report for today.
 

@@ -69,6 +69,7 @@ typedef struct {
     int top_apps;              /* max apps to display (default 20) */
     int top_titles;            /* max titles per app (default 5) */
     const gchar *grep_pattern; /* regex filter, NULL = no filter */
+    int cols;                  /* output width in columns (default 80) */
 } StatsOptions;
 
 gchar *build_csv_path(const gchar *data_dir_override,
